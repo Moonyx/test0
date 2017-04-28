@@ -38,6 +38,7 @@ import org.apache.http.util.EntityUtils;
 public class HttpClientUtil {
 	
 	private static final Log log = LogFactory.getLog(HttpClientUtil.class);
+	
 	private static PoolingHttpClientConnectionManager poolConnManager = null;
 	private int maxTotalPool = 200;
 	private int maxConPerRoute = 20;
