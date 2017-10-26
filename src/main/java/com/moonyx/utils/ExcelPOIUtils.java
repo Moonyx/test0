@@ -2,12 +2,15 @@ package com.moonyx.utils;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -15,14 +18,28 @@ import java.util.regex.Pattern;
 import org.apache.commons.lang.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.DateUtil;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.xssf.model.SharedStringsTable;
+import org.apache.poi.xssf.model.StylesTable;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFRichTextString;
+import org.xml.sax.Attributes;
+import org.xml.sax.ContentHandler;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.DefaultHandler;
+import org.xml.sax.helpers.XMLReaderFactory;
 
 public class ExcelPOIUtils {
 	
@@ -40,30 +57,27 @@ public class ExcelPOIUtils {
 	public static Map<String, List<List<Object>>> readExcelSheetDatas(InputStream stream, String fileName) throws Exception {
 		if (stream == null || StringUtils.isEmpty(fileName))
 			throw new Exception("未知文件格式。");;
-		Workbook workbook = null;
-		if (fileName.endsWith(".xls")) {
-			workbook = new HSSFWorkbook(stream);
-		} else if (fileName.endsWith(".xlsx")) {
-			workbook = new XSSFWorkbook(stream);
-		} else {
-			throw new Exception("只支持.xls / .xlsx格式。");
-		}
+		Workbook workbook = WorkbookFactory.create(stream);
 		Map<String, List<List<Object>>> sheetDatas = new HashMap<String, List<List<Object>>>();
 		for (int numSheet = 0; numSheet < workbook.getNumberOfSheets(); numSheet++) {
-			Sheet hssfSheet = workbook.getSheetAt(numSheet);
-			if (hssfSheet == null) {
+			Sheet sheet = workbook.getSheetAt(numSheet);
+			if (sheet == null) {
 				continue;
 			}
 			List<List<Object>> datas = new ArrayList<List<Object>>();
-			for (int rowNum = 0; rowNum <= hssfSheet.getLastRowNum(); rowNum++) {
-				Row hssfRow = hssfSheet.getRow(rowNum);
-				if (hssfRow == null) {
+			for (int rowNum = 0; rowNum <= sheet.getLastRowNum(); rowNum++) {
+				Row row = sheet.getRow(rowNum);
+				if (row == null) {
 					continue;
 				}
 				List<Object> data = new ArrayList<Object>();
 				boolean isRowAllNull = true;
-				for (int cellNum = 0; cellNum <= hssfRow.getLastCellNum(); cellNum++) {
-					Cell cell = hssfRow.getCell(cellNum);
+				for (int cellNum = 0; cellNum <= row.getLastCellNum(); cellNum++) {
+					Cell cell = null;
+					if (isMergedRegion(sheet, rowNum, cellNum))
+						cell = getMergedRegionCell(sheet, rowNum, cellNum);
+					else
+						cell = row.getCell(cellNum);
 					if (cell == null) {
 						data.add(null);
 						continue;
@@ -78,7 +92,7 @@ public class ExcelPOIUtils {
 				if (!isRowAllNull)
 					datas.add(data);
 			}
-			sheetDatas.put(hssfSheet.getSheetName(), datas);
+			sheetDatas.put(sheet.getSheetName(), datas);
 		}
 		return sheetDatas;
 	}
@@ -261,6 +275,186 @@ public class ExcelPOIUtils {
 			}
 		}
 		return ret;
+	}
+
+	/**
+	 * 判断指定的单元格是否是合并单元格
+	 * 
+	 * @param sheet
+	 * @param row
+	 *            行下标
+	 * @param column
+	 *            列下标
+	 * @return
+	 */
+	private static boolean isMergedRegion(Sheet sheet, int row, int column) {
+		int numMergedRegions = sheet.getNumMergedRegions();
+		for (int i = 0; i < numMergedRegions; i++) {
+			CellRangeAddress cellRangeAddress = sheet.getMergedRegion(i);
+			int firstColumn = cellRangeAddress.getFirstColumn();
+			int lastColumn = cellRangeAddress.getLastColumn();
+			int firstRow = cellRangeAddress.getFirstRow();
+			int lastRow = cellRangeAddress.getLastRow();
+			if (row >= firstRow && row <= lastRow && column >= firstColumn && column <= lastColumn)
+				return true;
+		}
+		return false;
+	}
+	
+	/**
+	 * 获取合并单元格的值
+	 * 
+	 * @param sheet
+	 * @param row
+	 * @param column
+	 * @return
+	 */
+	private static Cell getMergedRegionCell(Sheet sheet, int row, int column) {
+		int numMergedRegions = sheet.getNumMergedRegions();
+		for (int i = 0; i < numMergedRegions; i++) {
+			CellRangeAddress cellRangeAddress = sheet.getMergedRegion(i);
+			int firstColumn = cellRangeAddress.getFirstColumn();
+			int lastColumn = cellRangeAddress.getLastColumn();
+			int firstRow = cellRangeAddress.getFirstRow();
+			int lastRow = cellRangeAddress.getLastRow();
+			if (row >= firstRow && row <= lastRow && column >= firstColumn && column <= lastColumn) {
+				Row r = sheet.getRow(firstRow);
+				return r.getCell(firstColumn);
+			}
+		}
+		return null;
+	}
+	
+	public static void main(String[] args) {
+//		File file = new File("C:\\Users\\user\\Desktop\\CKSzz\\LT\\進口-北上資料-new\\Open PO(0920).xlsx");
+		File file = new File("C:\\Users\\user\\Desktop\\CKSzz\\LT\\進口-北上資料-new\\Open PO-1 - 副本.xlsx");
+		try {
+			readExcelSheetDatasForBigGrid(new FileInputStream(file), "Open PO(0920).xlsx");
+//			System.out.println("s");
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+
+	/**
+	 * 获取所有excel数据（大数据量）
+	 * 
+	 * @author lxh
+	 * @param
+	 * @return
+	 */
+	public static Map<String, List<List<Object>>> readExcelSheetDatasForBigGrid(InputStream stream, String fileName) throws Exception {
+		if (stream == null || StringUtils.isEmpty(fileName))
+			throw new Exception("未知文件格式。");
+		if (!fileName.endsWith(".xlsx")) {
+			throw new Exception("只支持.xlsx格式。");
+		}
+		Map<String, List<List<Object>>> sheetDatas = new LinkedHashMap<String, List<List<Object>>>();
+		List<List<Object>> rowList = new ArrayList<List<Object>>();
+		
+		OPCPackage opcPackage = OPCPackage.open(stream);
+		XSSFReader xssfReader = new XSSFReader(opcPackage);
+		SharedStringsTable sharedStringsTable = xssfReader.getSharedStringsTable();
+		StylesTable stylesTable = xssfReader.getStylesTable();
+		XMLReader parser = fetchSheetParser(sharedStringsTable, stylesTable, rowList);
+
+		Iterator<InputStream> sheetsDataInputStreamIterator = xssfReader.getSheetsData();
+		if (sheetsDataInputStreamIterator.hasNext()) {
+			InputStream sheetsDataInputStream = sheetsDataInputStreamIterator.next();
+			InputSource sheetsInputSource = new InputSource(sheetsDataInputStream);
+			parser.parse(sheetsInputSource);
+			sheetsDataInputStream.close();
+		}
+		sheetDatas.put("Sheet1", rowList);// 暂时支持单sheet
+		return sheetDatas;
+	}
+
+	public static XMLReader fetchSheetParser(SharedStringsTable sst, StylesTable stylesTable, List<List<Object>> rowList) throws SAXException {
+		XMLReader parser = XMLReaderFactory.createXMLReader("com.sun.org.apache.xerces.internal.parsers.SAXParser");//org.apache.xerces.parsers.SAXParser
+		ContentHandler handler = new SheetHandler(sst, stylesTable, rowList);
+		parser.setContentHandler(handler);
+		return parser;
+	}
+
+	/**
+	 * See org.xml.sax.helpers.DefaultHandler javadocs
+	 */
+	private static class SheetHandler extends DefaultHandler {
+		
+		private SharedStringsTable sst;
+		private StylesTable stylesTable;
+		private List<List<Object>> rowList;
+		private List<Object> cellList;
+		
+		private String lastContents;
+		private String lastName;
+		private String cellStyle;
+		private boolean nextIsString;
+
+		private SheetHandler(SharedStringsTable sst, StylesTable stylesTable, List<List<Object>> rowList) {
+			this.sst = sst;
+			this.stylesTable = stylesTable;
+			this.rowList = rowList;
+			this.cellList = new ArrayList<Object>();
+		}
+
+		public void startElement(String uri, String localName, String name, Attributes attributes) throws SAXException {
+			if ("c".equals(name)) {
+				String cellType = attributes.getValue("t");
+				cellStyle = attributes.getValue("s");
+				if (cellType != null && cellType.equals("s")) {
+					nextIsString = true;
+				} else {
+					nextIsString = false;
+				}
+			}
+			lastContents = "";
+		}
+
+		public void endElement(String uri, String localName, String name) throws SAXException {
+			if (nextIsString) {
+				int idx = Integer.parseInt(lastContents);
+				lastContents = new XSSFRichTextString(sst.getEntryAt(idx)).toString();
+				nextIsString = false;
+			}
+			System.out.println(name + "--" + lastContents);
+			if ("v".equals(name)) {
+				try {
+					if (cellStyle != null) {
+						int styleIndex = Integer.parseInt(cellStyle);
+						XSSFCellStyle style = stylesTable.getStyleAt(styleIndex);
+						int dataFormat = style.getDataFormat();
+						String dataFormatString = style.getDataFormatString();
+						Pattern dateCn = Pattern.compile(".*[a-z]{2,4}\"年\"m\"月\"(d\"日\")?.*");
+						if ((dateCn.matcher(dataFormatString).matches() || DateUtil.isADateFormat(dataFormat, dataFormatString)) 
+								&& StringUtils.isNumeric(lastContents))
+							cellList.add(HSSFDateUtil.getJavaDate(Double.valueOf(lastContents)));
+						else
+							cellList.add(lastContents);
+					} else {
+						cellList.add(lastContents);
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+					cellList.add(lastContents);
+				}
+			} else if ("c".equals(name) && name.equals(this.lastName)) {
+				cellList.add(null);
+			}
+			if ("row".equals(name)) {
+				rowList.add(cellList);
+				cellList = new ArrayList<Object>();
+			}
+			this.lastName = name;
+		}
+
+		public void characters(char[] ch, int start, int length) throws SAXException {
+			lastContents += new String(ch, start, length);
+		}
 	}
 
 }
