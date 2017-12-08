@@ -12,9 +12,11 @@ import com.moonyx.utils.StringUtils;
 
 public class EntityCreate {
 
-	public static void createEntity(String targetFolderPath, String entityClassName, String entityObjectName, List<Field> fields) {
+	public static void create(String targetFolderPath, List<Field> fields) {
+		String packageName = Creator.classFullName.replace("." + Creator.className, "");
+		
 		File entityModel = new File(Creator.modelPath + "entity.java");
-		File entityFile = new File(targetFolderPath + entityClassName + ".java");
+		File entityFile = new File(targetFolderPath + Creator.className + ".java");
 		BufferedReader reader = null;
 		FileWriter fw = null;
 		BufferedWriter writer = null;
@@ -25,8 +27,9 @@ public class EntityCreate {
 			writer = new BufferedWriter(fw);
 			String tempString = null;
 			while ((tempString = reader.readLine()) != null) {
-				String s = tempString.replaceAll("<EntityClassName>", entityClassName);
-				s = s.replaceAll("<EntityObjectName>", entityObjectName);
+				String s = tempString.replaceAll("<PackageName>", packageName);
+				s = s.replaceAll("<EntityClassName>", Creator.className);
+				s = s.replaceAll("<EntityObjectName>", Creator.objectName);
 				if (s.indexOf("<entityBody>") > -1) {
 					s = s.replaceAll("<entityBody>", "");
 					writer.newLine();
@@ -39,8 +42,7 @@ public class EntityCreate {
 					}
 					for (int i = 0; i < fields.size(); i++) {
 						Field field = fields.get(i);
-						String getFunction1 = "\tpublic " + getFieldType(field.getType()) + " get"
-								+ Creator.getEntityName(StringUtils.dbFieldNameToEntityFieldName(field.getName())) + "() {";
+						String getFunction1 = "\tpublic " + getFieldType(field.getType()) + " get" + parseFieldName(field) + "() {";
 						writer.write(getFunction1);
 						writer.newLine();
 						String getFunction2 = "\t\treturn " + StringUtils.dbFieldNameToEntityFieldName(field.getName())+ ";";
@@ -51,12 +53,12 @@ public class EntityCreate {
 						writer.newLine();
 						writer.newLine();
 
-						String setFunction1 = "\tpublic void set" + Creator.getEntityName(StringUtils.dbFieldNameToEntityFieldName(field.getName()))
-								+ "(" + getFieldType(field.getType()) + " " + StringUtils.dbFieldNameToEntityFieldName(field.getName()) + ") {";
+						String setFunction1 = "\tpublic void set" + parseFieldName(field) + "(" + getFieldType(field.getType()) + " "
+								+ StringUtils.dbFieldNameToEntityFieldName(field.getName()) + ") {";
 						writer.write(setFunction1);
 						writer.newLine();
 						String setFunction2 = "\t\tthis." + StringUtils.dbFieldNameToEntityFieldName(field.getName())
-								+ " = " + StringUtils.dbFieldNameToEntityFieldName(field.getName());
+								+ " = " + StringUtils.dbFieldNameToEntityFieldName(field.getName()) + ";";
 						writer.write(setFunction2);
 						writer.newLine();
 						String setFunction3 = "\t}";
@@ -115,6 +117,12 @@ public class EntityCreate {
 		if (dbFieldType.indexOf("DOUBLE") > -1)
 			return "double";
 		return "NULL";
+	}
+	
+	public static String parseFieldName(Field field) {
+		String fieldName = StringUtils.dbFieldNameToEntityFieldName(field.getName());
+		String h = fieldName.substring(0, 1).toUpperCase();
+		return h + fieldName.substring(1);
 	}
 
 }
